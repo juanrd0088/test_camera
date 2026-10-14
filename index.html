@@ -1,0 +1,839 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Cámara">
+<meta name="theme-color" content="#000000">
+<meta name="color-scheme" content="dark">
+<title>Cámara</title>
+<style>
+  :root{
+    --bg:#000;
+    --fg:#fff;
+    --muted:rgba(255,255,255,.62);
+    --chip:rgba(255,255,255,.14);
+    --chip-strong:rgba(255,255,255,.22);
+    --accent:#ffd60a;
+    --ok:#30d158;
+    --danger:#ff453a;
+    --panel:#1c1c1e;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{
+    margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Text","Segoe UI",Roboto,sans-serif;
+    overflow:hidden;overscroll-behavior:none;
+    -webkit-user-select:none;user-select:none;-webkit-touch-callout:none;
+    touch-action:manipulation;
+  }
+  button{font:inherit;color:inherit;border:0;background:none;padding:0;cursor:pointer}
+  button:disabled{opacity:.4;cursor:default}
+  [hidden]{display:none!important}
+  svg{display:block}
+
+  #app{position:fixed;inset:0;display:flex;flex-direction:column}
+
+  /* Barra superior */
+  .top{
+    display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+    padding:calc(env(safe-area-inset-top) + 8px) 16px 8px;
+  }
+  #torchBtn{grid-column:1;justify-self:start}
+  #resChip{grid-column:2}
+  #settingsBtn{grid-column:3;justify-self:end}
+  .icon-btn{width:40px;height:40px;border-radius:50%;background:var(--chip);display:grid;place-items:center;flex:none}
+  .icon-btn svg{width:22px;height:22px}
+  .icon-btn.on{background:var(--accent);color:#000}
+  .res-chip{
+    font-size:13px;font-weight:600;padding:7px 12px;border-radius:999px;
+    background:var(--chip);color:var(--muted);font-variant-numeric:tabular-nums;white-space:nowrap;
+  }
+
+  /* Visor */
+  .stage{position:relative;flex:1;min-height:0;overflow:hidden;touch-action:none}
+  video{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;background:#000}
+  video.mirror{transform:scaleX(-1)}
+  .flash{position:absolute;inset:0;background:#fff;opacity:0;pointer-events:none}
+  .flash.go{animation:flash .3s ease-out}
+  @keyframes flash{0%{opacity:.85}100%{opacity:0}}
+  .msg{
+    position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
+    gap:14px;padding:24px;text-align:center;background:#000;
+  }
+  .msg strong{font-size:18px}
+  .msg p{margin:0;max-width:360px;line-height:1.45;color:var(--muted);font-size:15px}
+  .btn{
+    padding:12px 18px;border-radius:12px;background:var(--chip-strong);
+    font-weight:600;font-size:15px;display:flex;align-items:center;justify-content:center;gap:8px;
+  }
+  .btn svg{width:20px;height:20px}
+  .btn.primary{background:var(--fg);color:#000}
+  .btn.danger{color:var(--danger)}
+
+  /* Controles inferiores */
+  .controls{padding:10px 22px calc(env(safe-area-inset-bottom) + 18px)}
+  .focusbar{display:flex;align-items:center;gap:10px;margin:0 auto 12px;max-width:440px}
+  .focusbar span{font-size:12px;color:var(--muted)}
+  .focusbar input{flex:1;accent-color:var(--accent)}
+  .focusbar .btn{padding:6px 12px;font-size:13px;border-radius:999px}
+  .zoombar{display:flex;justify-content:center;align-items:center;gap:8px;margin-bottom:14px;min-height:36px}
+  .zoombar button{
+    min-width:34px;height:34px;padding:0 9px;border-radius:999px;background:var(--chip);
+    font-size:12px;font-weight:700;font-variant-numeric:tabular-nums;
+  }
+  .zoombar button.active{color:var(--accent);background:rgba(0,0,0,.55);font-size:13px;min-width:44px}
+  .row{display:grid;grid-template-columns:1fr auto 1fr;align-items:center}
+  .thumb{
+    justify-self:start;width:54px;height:54px;border-radius:10px;border:2px solid rgba(255,255,255,.85);
+    background:#1c1c1e center/cover no-repeat;position:relative;
+  }
+  .badge{
+    position:absolute;top:-8px;right:-8px;min-width:21px;height:21px;padding:0 6px;border-radius:999px;
+    background:var(--danger);color:#fff;font-size:12px;font-weight:700;display:grid;place-items:center;
+  }
+  .shutter{width:78px;height:78px;border-radius:50%;border:4px solid #fff;position:relative}
+  .shutter::after{content:"";position:absolute;inset:5px;border-radius:50%;background:#fff;transition:transform .12s}
+  .shutter:active::after{transform:scale(.86)}
+  .flip{justify-self:end;width:48px;height:48px}
+
+  .toast{
+    position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom) + 150px);
+    transform:translateX(-50%) translateY(10px);background:rgba(36,36,38,.95);
+    padding:10px 16px;border-radius:12px;font-size:14px;line-height:1.35;opacity:0;transition:opacity .2s,transform .2s;
+    pointer-events:none;width:max-content;max-width:calc(100% - 32px);text-align:center;z-index:60;
+  }
+  .toast.show{opacity:1;transform:translateX(-50%) translateY(0)}
+
+  /* Galería */
+  .viewer{position:fixed;inset:0;background:#000;display:flex;flex-direction:column;z-index:20}
+  .viewer header{
+    display:grid;grid-template-columns:1fr auto 1fr;align-items:center;
+    padding:calc(env(safe-area-inset-top) + 8px) 12px 8px;
+  }
+  .viewer header > :first-child{justify-self:start}
+  .viewer header > :last-child{justify-self:end}
+  .viewer .count{text-align:center;font-size:15px;font-weight:600;font-variant-numeric:tabular-nums}
+  .viewer .status{display:block;font-size:12px;font-weight:500;color:var(--muted);margin-top:2px}
+  .viewer .status.saved{color:var(--ok)}
+  .pic{flex:1;min-height:0;position:relative;touch-action:pan-y}
+  .pic img{position:absolute;inset:0;width:100%;height:100%;object-fit:contain;-webkit-touch-callout:default}
+  .nav{
+    position:absolute;top:50%;transform:translateY(-50%);width:40px;height:40px;border-radius:50%;
+    background:rgba(0,0,0,.5);display:grid;place-items:center;
+  }
+  .nav svg{width:22px;height:22px}
+  .nav.prev{left:8px}
+  .nav.next{right:8px}
+  .viewer footer{
+    display:grid;grid-template-columns:1fr 1fr;gap:10px;
+    padding:12px 16px calc(env(safe-area-inset-bottom) + 14px);
+  }
+  .viewer footer .btn{min-height:50px}
+  .viewer footer .wide{grid-column:1/-1}
+
+  /* Ajustes */
+  .backdrop{position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:40;display:flex;align-items:flex-end}
+  .sheet{
+    width:100%;max-width:560px;margin:0 auto;background:var(--panel);border-radius:16px 16px 0 0;
+    padding:8px 18px calc(env(safe-area-inset-bottom) + 18px);max-height:88%;overflow:auto;
+    -webkit-user-select:none;user-select:none;
+  }
+  .grabber{width:36px;height:5px;border-radius:3px;background:rgba(255,255,255,.25);margin:4px auto 12px}
+  .sheet h2{font-size:18px;margin:0 0 16px;display:flex;justify-content:space-between;align-items:center}
+  .group{margin-bottom:20px}
+  .label{font-size:13px;color:var(--muted);margin-bottom:8px}
+  .seg{display:grid;grid-template-columns:repeat(3,1fr);background:rgba(255,255,255,.08);border-radius:10px;padding:3px;gap:3px}
+  .seg button{padding:9px 4px;border-radius:8px;font-size:14px;font-weight:600;color:var(--muted)}
+  .seg button.active{background:rgba(255,255,255,.22);color:var(--fg)}
+  .hint{font-size:13px;color:var(--muted);margin-top:8px;line-height:1.4}
+  .toggle-row{display:flex;align-items:center;justify-content:space-between;gap:14px}
+  .toggle-row .t{font-weight:600;font-size:15px}
+  .toggle-row .hint{margin-top:4px}
+  .switch{width:51px;height:31px;border-radius:999px;background:rgba(255,255,255,.2);position:relative;flex:none;transition:background .2s}
+  .switch::after{content:"";position:absolute;top:2px;left:2px;width:27px;height:27px;border-radius:50%;background:#fff;transition:transform .2s}
+  .switch[aria-checked="true"]{background:var(--ok)}
+  .switch[aria-checked="true"]::after{transform:translateX(20px)}
+  .sheet .btn{width:100%}
+</style>
+</head>
+<body>
+
+<div id="app">
+  <div class="top">
+    <button class="icon-btn" id="torchBtn" hidden aria-label="Linterna">
+      <svg viewBox="0 0 24 24" fill="currentColor"><path d="M13 2 4.5 13.5H11L10 22l8.5-11.5H12L13 2z"/></svg>
+    </button>
+    <button class="res-chip" id="resChip" aria-label="Resolución">—</button>
+    <button class="icon-btn" id="settingsBtn" aria-label="Ajustes">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+    </button>
+  </div>
+
+  <div class="stage" id="stage">
+    <video id="video" playsinline muted autoplay></video>
+    <div class="flash" id="flash"></div>
+    <div class="msg" id="msg" hidden>
+      <strong id="msgTitle"></strong>
+      <p id="msgText"></p>
+      <button class="btn primary" id="retryBtn">Reintentar</button>
+    </div>
+  </div>
+
+  <div class="controls">
+    <div class="focusbar" id="focusBar" hidden>
+      <span>Enfoque</span>
+      <input type="range" id="focusRange" aria-label="Enfoque manual">
+      <button class="btn" id="focusAuto">Auto</button>
+    </div>
+    <div class="zoombar" id="zoomBar"></div>
+    <div class="row">
+      <button class="thumb" id="thumb" disabled aria-label="Ver fotos">
+        <span class="badge" id="badge" hidden></span>
+      </button>
+      <button class="shutter" id="shutter" disabled aria-label="Hacer foto"></button>
+      <button class="icon-btn flip" id="flipBtn" aria-label="Cambiar cámara">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 11a8 8 0 0 0-14.5-4.6L4 8"/><path d="M4 4v4h4"/><path d="M4 13a8 8 0 0 0 14.5 4.6L20 16"/><path d="M20 20v-4h-4"/></svg>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Galería de fotos hechas -->
+<div class="viewer" id="viewer" hidden>
+  <header>
+    <button class="icon-btn" id="closeViewer" aria-label="Cerrar">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+    </button>
+    <div class="count"><span id="vCount">1 / 1</span><span class="status" id="vStatus"></span></div>
+    <button class="icon-btn" id="deleteBtn" aria-label="Borrar foto">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4h8v2"/><path d="M19 6l-1 14H6L5 6"/><path d="M10 11v6M14 11v6"/></svg>
+    </button>
+  </header>
+  <div class="pic" id="pic">
+    <img id="vImg" alt="Foto">
+    <button class="nav prev" id="prevBtn" aria-label="Anterior">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M15 6l-6 6 6 6"/></svg>
+    </button>
+    <button class="nav next" id="nextBtn" aria-label="Siguiente">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M9 6l6 6-6 6"/></svg>
+    </button>
+  </div>
+  <footer>
+    <button class="btn primary wide" id="saveBtn">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12"/><path d="M7 8l5-5 5 5"/><path d="M5 13v6a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2v-6"/></svg>
+      Guardar en Fotos
+    </button>
+    <button class="btn" id="downloadBtn">Guardar en Archivos</button>
+    <button class="btn" id="saveAllBtn">Todas</button>
+  </footer>
+</div>
+
+<!-- Ajustes -->
+<div class="backdrop" id="sheet" hidden>
+  <div class="sheet" role="dialog" aria-label="Ajustes">
+    <div class="grabber"></div>
+    <h2>Ajustes
+      <button class="icon-btn" id="closeSheet" aria-label="Cerrar ajustes">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </h2>
+
+    <div class="group">
+      <div class="label">Resolución</div>
+      <div class="seg" id="resSeg">
+        <button data-res="max">Máxima</button>
+        <button data-res="r1080">1080p</button>
+        <button data-res="r720">720p</button>
+      </div>
+      <div class="hint" id="resHint"></div>
+    </div>
+
+    <div class="group">
+      <div class="toggle-row">
+        <div>
+          <div class="t">Guardar al disparar</div>
+          <div class="hint">Después de cada foto se abre el menú Compartir para tocar «Guardar imagen». Desactívalo para hacer varias fotos seguidas y guardarlas todas juntas desde la miniatura.</div>
+        </div>
+        <button class="switch" id="quickSwitch" role="switch" aria-checked="false" aria-label="Guardar al disparar"></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <button class="btn danger" id="clearSavedBtn">Quitar de aquí las fotos ya guardadas</button>
+      <div class="hint">Solo las borra de esta página. Lo que ya está en tu galería o en Archivos no se toca.</div>
+    </div>
+  </div>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const $ = id => document.getElementById(id);
+  const video = $('video'), stage = $('stage'), flash = $('flash');
+  const shutter = $('shutter'), thumb = $('thumb'), badge = $('badge');
+  const torchBtn = $('torchBtn'), resChip = $('resChip'), settingsBtn = $('settingsBtn'), flipBtn = $('flipBtn');
+  const zoomBar = $('zoomBar'), focusBar = $('focusBar'), focusRange = $('focusRange'), focusAuto = $('focusAuto');
+  const viewer = $('viewer'), vImg = $('vImg'), vCount = $('vCount'), vStatus = $('vStatus');
+  const prevBtn = $('prevBtn'), nextBtn = $('nextBtn'), pic = $('pic');
+  const saveBtn = $('saveBtn'), downloadBtn = $('downloadBtn'), saveAllBtn = $('saveAllBtn'), deleteBtn = $('deleteBtn');
+  const sheet = $('sheet'), resSeg = $('resSeg'), resHint = $('resHint'), quickSwitch = $('quickSwitch');
+
+  const JPEG_QUALITY = 0.95;
+
+  // Resoluciones que se piden a la cámara (son "ideales": Safari elige la más cercana que tenga).
+  const RES = {
+    max:   { width: { ideal: 4032 }, height: { ideal: 3024 } },
+    r1080: { width: { ideal: 1920 }, height: { ideal: 1080 } },
+    r720:  { width: { ideal: 1280 }, height: { ideal: 720 } },
+  };
+
+  /* ---------- Preferencias ---------- */
+  const prefs = {
+    get(k, d) { try { const v = localStorage.getItem('camara.' + k); return v === null ? d : JSON.parse(v); } catch (e) { return d; } },
+    set(k, v) { try { localStorage.setItem('camara.' + k, JSON.stringify(v)); } catch (e) {} },
+  };
+  const settings = {
+    res: prefs.get('res', 'max'),
+    facing: prefs.get('facing', 'environment'),
+    quickSave: prefs.get('quickSave', true),
+  };
+  if (!RES[settings.res]) settings.res = 'max';
+  if (settings.facing !== 'user') settings.facing = 'environment';
+
+  /* ---------- Utilidades ---------- */
+  let toastTimer;
+  function toast(text, ms = 2400) {
+    const el = $('toast');
+    el.textContent = text;
+    el.classList.add('show');
+    clearTimeout(toastTimer);
+    toastTimer = setTimeout(() => el.classList.remove('show'), ms);
+  }
+  function showMsg(title, text, retry = true) {
+    $('msgTitle').textContent = title;
+    $('msgText').textContent = text;
+    $('retryBtn').hidden = !retry;
+    $('msg').hidden = false;
+  }
+  function hideMsg() { $('msg').hidden = true; }
+  const fmtNum = (n, d = 1) => n.toLocaleString('es-ES', { maximumFractionDigits: d });
+  const megapixels = (w, h) => fmtNum(w * h / 1e6) + ' MP';
+  function fileName(ts) {
+    const d = new Date(ts), p = (n, l = 2) => String(n).padStart(l, '0');
+    return `IMG_${d.getFullYear()}${p(d.getMonth() + 1)}${p(d.getDate())}_${p(d.getHours())}${p(d.getMinutes())}${p(d.getSeconds())}_${p(d.getMilliseconds(), 3)}.jpg`;
+  }
+  function dataURLtoBlob(dataUrl) {
+    const comma = dataUrl.indexOf(',');
+    const mime = (dataUrl.slice(0, comma).match(/:(.*?);/) || [])[1] || 'image/jpeg';
+    const bin = atob(dataUrl.slice(comma + 1));
+    const bytes = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+    return new Blob([bytes], { type: mime });
+  }
+
+  /* ---------- Almacenamiento de fotos (IndexedDB) ---------- */
+  // Las fotos se quedan aquí hasta que las borres, por si Safari recarga la página antes de que las guardes.
+  const db = (() => {
+    let opening = null;
+    function open() {
+      if (opening) return opening;
+      opening = new Promise((resolve, reject) => {
+        if (!('indexedDB' in window)) return reject(new Error('Sin IndexedDB'));
+        const req = indexedDB.open('camara-web', 1);
+        req.onupgradeneeded = () => req.result.createObjectStore('photos', { keyPath: 'id' });
+        req.onsuccess = () => resolve(req.result);
+        req.onerror = () => reject(req.error);
+      });
+      return opening;
+    }
+    async function run(mode, fn) {
+      const d = await open();
+      return new Promise((resolve, reject) => {
+        const tx = d.transaction('photos', mode);
+        const req = fn(tx.objectStore('photos'));
+        tx.oncomplete = () => resolve(req ? req.result : undefined);
+        tx.onerror = () => reject(tx.error);
+        tx.onabort = () => reject(tx.error);
+      });
+    }
+    return {
+      put(p) {
+        const rec = { id: p.id, ts: p.ts, w: p.w, h: p.h, name: p.name, thumb: p.thumb, saved: p.saved, blob: p.blob };
+        return run('readwrite', s => s.put(rec)).catch(e => console.warn('No se pudo guardar en IndexedDB', e));
+      },
+      del(id) { return run('readwrite', s => s.delete(id)).catch(e => console.warn(e)); },
+      all() { return run('readonly', s => s.getAll()).catch(() => []); },
+    };
+  })();
+
+  /* ---------- Cámara ---------- */
+  let stream = null, track = null, caps = {}, gen = 0;
+
+  function stopCamera() {
+    if (stream) stream.getTracks().forEach(t => t.stop());
+    stream = null; track = null;
+    video.srcObject = null;
+  }
+
+  function waitForVideo() {
+    return new Promise(resolve => {
+      if (video.videoWidth) return resolve();
+      let done = false;
+      const finish = () => { if (!done) { done = true; resolve(); } };
+      video.addEventListener('loadedmetadata', finish, { once: true });
+      video.addEventListener('resize', finish, { once: true });
+      setTimeout(finish, 4000);
+    });
+  }
+
+  async function startCamera() {
+    const my = ++gen;
+    shutter.disabled = true;
+    hideMsg();
+    stopCamera();
+
+    if (!window.isSecureContext || !navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      showMsg('Abre la página desde https://',
+        'Safari solo deja usar la cámara a páginas servidas por https. Abierta como archivo desde «Archivos» no funciona: súbela a un alojamiento gratuito (GitHub Pages, Netlify…) y ábrela desde su dirección.', false);
+      return;
+    }
+
+    let s;
+    try {
+      s = await navigator.mediaDevices.getUserMedia({
+        audio: false,
+        video: Object.assign({ facingMode: { ideal: settings.facing } }, RES[settings.res]),
+      });
+    } catch (e) {
+      if (my !== gen) return;
+      if (e && (e.name === 'NotAllowedError' || e.name === 'SecurityError')) {
+        showMsg('Sin permiso para usar la cámara',
+          'Dale permiso a esta web para usar la cámara (en Safari: ajustes del sitio web, junto a la barra de direcciones → Cámara → Permitir; o en Ajustes del iPhone → Safari → Cámara). Luego pulsa Reintentar.');
+        return;
+      }
+      try {
+        s = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: settings.facing } });
+      } catch (e2) {
+        if (my !== gen) return;
+        showMsg('No se pudo abrir la cámara', (e2 && (e2.message || e2.name)) || String(e2));
+        return;
+      }
+    }
+    if (my !== gen) { s.getTracks().forEach(t => t.stop()); return; }
+
+    stream = s;
+    track = s.getVideoTracks()[0];
+    track.addEventListener('ended', () => { if (document.visibilityState === 'visible') startCamera(); });
+    video.classList.toggle('mirror', settings.facing === 'user');
+    video.srcObject = s;
+    try { await video.play(); } catch (e) {}
+    await waitForVideo();
+    if (my !== gen) return;
+
+    setupCapabilities();
+    updateResLabel();
+    shutter.disabled = false;
+  }
+
+  // Cola de ajustes de la cámara (zoom, linterna, enfoque) para no solaparlos.
+  let applying = false;
+  const pending = {};
+  function applyAdvanced(obj) {
+    Object.assign(pending, obj);
+    if (!applying) pump();
+  }
+  async function pump() {
+    applying = true;
+    while (Object.keys(pending).length) {
+      const c = Object.assign({}, pending);
+      Object.keys(pending).forEach(k => delete pending[k]);
+      try {
+        if (track) await track.applyConstraints(Object.assign({}, RES[settings.res], { advanced: [c] }));
+      } catch (e) { console.warn('applyConstraints', c, e); }
+    }
+    applying = false;
+  }
+
+  /* Linterna, zoom y enfoque: solo aparecen si el navegador los ofrece */
+  let zoomCaps = null, zoom = 1, torchOn = false;
+
+  function setupCapabilities() {
+    caps = {};
+    let st = {};
+    try { caps = track && track.getCapabilities ? track.getCapabilities() || {} : {}; } catch (e) {}
+    try { st = track && track.getSettings ? track.getSettings() || {} : {}; } catch (e) {}
+
+    torchOn = false;
+    torchBtn.classList.remove('on');
+    torchBtn.hidden = !caps.torch;
+
+    if (caps.zoom && typeof caps.zoom.max === 'number' && caps.zoom.max > caps.zoom.min) {
+      zoomCaps = caps.zoom;
+      zoom = typeof st.zoom === 'number' ? st.zoom : caps.zoom.min;
+      buildZoomBar();
+    } else {
+      zoomCaps = null;
+      zoomBar.innerHTML = '';
+    }
+
+    const fm = Array.isArray(caps.focusMode) ? caps.focusMode : [];
+    const fd = caps.focusDistance;
+    if (fd && fm.includes('manual') && fd.max > fd.min) {
+      focusRange.min = fd.min;
+      focusRange.max = fd.max;
+      focusRange.step = fd.step || (fd.max - fd.min) / 100;
+      focusRange.value = typeof st.focusDistance === 'number' ? st.focusDistance : fd.min;
+      focusBar.hidden = false;
+    } else {
+      focusBar.hidden = true;
+    }
+  }
+
+  function zoomPresets() {
+    const out = [zoomCaps.min];
+    [2, 3, 5].forEach(v => { if (v > zoomCaps.min + 0.05 && v <= zoomCaps.max + 0.001) out.push(v); });
+    return out;
+  }
+  function buildZoomBar() {
+    zoomBar.innerHTML = '';
+    zoomPresets().forEach(v => {
+      const b = document.createElement('button');
+      b.dataset.z = v;
+      b.setAttribute('aria-label', 'Zoom ' + fmtNum(v) + 'x');
+      b.addEventListener('click', () => setZoom(v));
+      zoomBar.appendChild(b);
+    });
+    updateZoomUI();
+  }
+  function updateZoomUI() {
+    const btns = Array.from(zoomBar.children);
+    if (!btns.length) return;
+    let active = 0;
+    btns.forEach((b, i) => { if (zoom >= parseFloat(b.dataset.z) - 0.05) active = i; });
+    btns.forEach((b, i) => {
+      const v = parseFloat(b.dataset.z);
+      b.classList.toggle('active', i === active);
+      b.textContent = i === active ? fmtNum(zoom) + '×' : fmtNum(v);
+    });
+  }
+  function setZoom(z) {
+    if (!zoomCaps) return;
+    zoom = Math.round(Math.min(zoomCaps.max, Math.max(zoomCaps.min, z)) * 100) / 100;
+    updateZoomUI();
+    applyAdvanced({ zoom });
+  }
+
+  torchBtn.addEventListener('click', () => {
+    if (!track) return;
+    torchOn = !torchOn;
+    torchBtn.classList.toggle('on', torchOn);
+    applyAdvanced({ torch: torchOn });
+  });
+
+  focusRange.addEventListener('input', () => {
+    applyAdvanced({ focusMode: 'manual', focusDistance: parseFloat(focusRange.value) });
+  });
+  focusAuto.addEventListener('click', () => {
+    const fm = Array.isArray(caps.focusMode) ? caps.focusMode : [];
+    const mode = fm.includes('continuous') ? 'continuous' : (fm.includes('single-shot') ? 'single-shot' : null);
+    if (mode) { applyAdvanced({ focusMode: mode }); toast('Enfoque automático'); }
+  });
+
+  // Pellizcar para hacer zoom
+  let pinch = null;
+  const dist = t => Math.hypot(t[0].clientX - t[1].clientX, t[0].clientY - t[1].clientY);
+  stage.addEventListener('touchstart', e => {
+    if (e.touches.length === 2 && zoomCaps) pinch = { d: dist(e.touches), z: zoom };
+  }, { passive: true });
+  stage.addEventListener('touchmove', e => {
+    if (pinch && e.touches.length === 2) {
+      e.preventDefault();
+      setZoom(pinch.z * dist(e.touches) / pinch.d);
+    }
+  }, { passive: false });
+  stage.addEventListener('touchend', e => { if (e.touches.length < 2) pinch = null; });
+  document.addEventListener('gesturestart', e => e.preventDefault());
+
+  function updateResLabel() {
+    const w = video.videoWidth, h = video.videoHeight;
+    resChip.textContent = w ? megapixels(w, h) : '—';
+    resHint.textContent = w
+      ? `Ahora mismo: ${w} × ${h} píxeles (${megapixels(w, h)}). Si con alguna resolución la cámara enfoca mejor que con otra, quédate con esa.`
+      : '';
+  }
+  video.addEventListener('resize', updateResLabel);
+
+  flipBtn.addEventListener('click', () => {
+    settings.facing = settings.facing === 'environment' ? 'user' : 'environment';
+    prefs.set('facing', settings.facing);
+    startCamera();
+  });
+  $('retryBtn').addEventListener('click', startCamera);
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible' && (!track || track.readyState === 'ended')) startCamera();
+  });
+  window.addEventListener('pageshow', e => {
+    if (e.persisted && (!track || track.readyState === 'ended')) startCamera();
+  });
+
+  /* ---------- Hacer fotos ---------- */
+  const capCanvas = document.createElement('canvas');
+  const thumbCanvas = document.createElement('canvas');
+  thumbCanvas.width = thumbCanvas.height = 160;
+
+  function grabFrame() {
+    const w = video.videoWidth, h = video.videoHeight;
+    if (!w || !h) return null;
+    capCanvas.width = w;
+    capCanvas.height = h;
+    const ctx = capCanvas.getContext('2d');
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    if (settings.facing === 'user') { ctx.translate(w, 0); ctx.scale(-1, 1); }
+    ctx.drawImage(video, 0, 0, w, h);
+    return capCanvas;
+  }
+  function makeThumb(src) {
+    const s = 160, r = Math.max(s / src.width, s / src.height);
+    const w = src.width * r, h = src.height * r;
+    const ctx = thumbCanvas.getContext('2d');
+    ctx.drawImage(src, (s - w) / 2, (s - h) / 2, w, h);
+    return thumbCanvas.toDataURL('image/jpeg', 0.7);
+  }
+  function flashEffect() {
+    flash.classList.remove('go');
+    void flash.offsetWidth;
+    flash.classList.add('go');
+  }
+
+  const canShareFiles = (() => {
+    try {
+      const f = new File([new Blob(['x'], { type: 'image/jpeg' })], 'prueba.jpg', { type: 'image/jpeg' });
+      return !!(navigator.canShare && navigator.share && navigator.canShare({ files: [f] }));
+    } catch (e) { return false; }
+  })();
+
+  shutter.addEventListener('click', () => {
+    if (!track) return;
+    const canvas = grabFrame();
+    if (!canvas) return;
+    flashEffect();
+    const w = canvas.width, h = canvas.height;
+    const thumbUrl = makeThumb(canvas);
+
+    if (settings.quickSave && canShareFiles) {
+      // Todo síncrono para que Safari siga considerando que es el toque del usuario
+      // y deje abrir el menú Compartir.
+      let blob;
+      try { blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', JPEG_QUALITY)); }
+      catch (e) { toast('No se pudo crear la foto'); return; }
+      const p = addPhoto(blob, w, h, thumbUrl);
+      shareList([p]);
+    } else {
+      canvas.toBlob(b => {
+        if (!b) { toast('No se pudo crear la foto'); return; }
+        addPhoto(b, w, h, thumbUrl);
+      }, 'image/jpeg', JPEG_QUALITY);
+    }
+  });
+
+  /* ---------- Fotos en memoria ---------- */
+  let photos = [];
+
+  function addPhoto(blob, w, h, thumbUrl) {
+    const ts = Date.now();
+    const p = {
+      id: ts.toString(36) + Math.random().toString(36).slice(2, 7),
+      ts, w, h, thumb: thumbUrl, blob, saved: false, name: fileName(ts),
+    };
+    photos.push(p);
+    db.put(p);
+    refreshThumb();
+    return p;
+  }
+  function urlOf(p) {
+    if (!p.url) p.url = URL.createObjectURL(p.blob);
+    return p.url;
+  }
+  function markSaved(list) {
+    list.forEach(p => { p.saved = true; db.put(p); });
+    refreshThumb();
+    if (!viewer.hidden) renderViewer();
+  }
+  function removePhoto(p) {
+    const i = photos.indexOf(p);
+    if (i < 0) return;
+    photos.splice(i, 1);
+    if (p.url) URL.revokeObjectURL(p.url);
+    db.del(p.id);
+  }
+  function refreshThumb() {
+    const last = photos[photos.length - 1];
+    thumb.disabled = !last;
+    thumb.style.backgroundImage = last ? `url("${last.thumb}")` : '';
+    const unsaved = photos.filter(p => !p.saved).length;
+    badge.hidden = !unsaved;
+    badge.textContent = unsaved;
+  }
+
+  /* ---------- Guardar ---------- */
+  function shareList(list) {
+    if (!list.length) return;
+    const files = list.map(p => new File([p.blob], p.name, { type: 'image/jpeg', lastModified: p.ts }));
+    let ok = canShareFiles;
+    try { ok = ok && navigator.canShare({ files }); } catch (e) { ok = false; }
+    if (!ok) {
+      if (list.length === 1) { downloadPhoto(list[0]); return; }
+      toast('Este navegador no deja compartir varias fotos a la vez. Guárdalas una a una.');
+      return;
+    }
+    navigator.share({ files }).then(() => {
+      markSaved(list);
+      toast(list.length > 1 ? `Listo: ${list.length} fotos` : 'Listo');
+    }).catch(e => {
+      if (e && e.name === 'AbortError') return;
+      if (e && e.name === 'NotAllowedError') {
+        toast('Toca la miniatura y luego «Guardar en Fotos».', 3200);
+        return;
+      }
+      toast('No se pudo abrir el menú Compartir' + (e && e.message ? ': ' + e.message : ''));
+    });
+  }
+  function downloadPhoto(p) {
+    const a = document.createElement('a');
+    a.href = urlOf(p);
+    a.download = p.name;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    markSaved([p]);
+  }
+
+  /* ---------- Galería ---------- */
+  let vi = 0;
+  function openViewer() {
+    if (!photos.length) return;
+    vi = photos.length - 1;
+    viewer.hidden = false;
+    renderViewer();
+  }
+  function closeViewer() {
+    viewer.hidden = true;
+    vImg.removeAttribute('src');
+  }
+  function renderViewer() {
+    if (!photos.length) { closeViewer(); return; }
+    vi = Math.max(0, Math.min(vi, photos.length - 1));
+    const p = photos[vi];
+    vImg.src = urlOf(p);
+    vCount.textContent = `${vi + 1} / ${photos.length}`;
+    vStatus.textContent = (p.saved ? 'Guardada ✓' : 'Sin guardar') + ` · ${p.w}×${p.h}`;
+    vStatus.classList.toggle('saved', p.saved);
+    prevBtn.hidden = vi === 0;
+    nextBtn.hidden = vi === photos.length - 1;
+    const unsaved = photos.filter(x => !x.saved).length;
+    saveAllBtn.textContent = unsaved ? `Guardar todas (${unsaved})` : 'Todas guardadas';
+    saveAllBtn.disabled = !unsaved;
+  }
+  thumb.addEventListener('click', openViewer);
+  $('closeViewer').addEventListener('click', closeViewer);
+  prevBtn.addEventListener('click', () => { vi--; renderViewer(); });
+  nextBtn.addEventListener('click', () => { vi++; renderViewer(); });
+  saveBtn.addEventListener('click', () => { if (photos[vi]) shareList([photos[vi]]); });
+  downloadBtn.addEventListener('click', () => { if (photos[vi]) downloadPhoto(photos[vi]); });
+  saveAllBtn.addEventListener('click', () => shareList(photos.filter(p => !p.saved)));
+  deleteBtn.addEventListener('click', () => {
+    const p = photos[vi];
+    if (!p) return;
+    if (!p.saved && !confirm('Esta foto aún no está guardada en tu galería. ¿Borrarla igualmente?')) return;
+    removePhoto(p);
+    refreshThumb();
+    renderViewer();
+  });
+
+  let sx = null, sy = null;
+  pic.addEventListener('touchstart', e => {
+    if (e.touches.length === 1) { sx = e.touches[0].clientX; sy = e.touches[0].clientY; }
+  }, { passive: true });
+  pic.addEventListener('touchend', e => {
+    if (sx === null) return;
+    const t = e.changedTouches[0], dx = t.clientX - sx, dy = t.clientY - sy;
+    sx = null;
+    if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.3) {
+      vi += dx < 0 ? 1 : -1;
+      renderViewer();
+    }
+  }, { passive: true });
+
+  /* ---------- Ajustes ---------- */
+  function renderSettings() {
+    Array.from(resSeg.children).forEach(b => b.classList.toggle('active', b.dataset.res === settings.res));
+    quickSwitch.setAttribute('aria-checked', String(settings.quickSave && canShareFiles));
+    quickSwitch.disabled = !canShareFiles;
+    updateResLabel();
+  }
+  function openSheet() { renderSettings(); sheet.hidden = false; }
+  settingsBtn.addEventListener('click', openSheet);
+  resChip.addEventListener('click', openSheet);
+  $('closeSheet').addEventListener('click', () => { sheet.hidden = true; });
+  sheet.addEventListener('click', e => { if (e.target === sheet) sheet.hidden = true; });
+  resSeg.addEventListener('click', e => {
+    const b = e.target.closest('button[data-res]');
+    if (!b || b.dataset.res === settings.res) return;
+    settings.res = b.dataset.res;
+    prefs.set('res', settings.res);
+    renderSettings();
+    resHint.textContent = 'Cambiando resolución…';
+    startCamera().then(updateResLabel);
+  });
+  quickSwitch.addEventListener('click', () => {
+    settings.quickSave = !settings.quickSave;
+    prefs.set('quickSave', settings.quickSave);
+    renderSettings();
+  });
+  $('clearSavedBtn').addEventListener('click', () => {
+    const saved = photos.filter(p => p.saved);
+    if (!saved.length) { toast('No hay fotos guardadas que quitar'); return; }
+    if (!confirm(`¿Quitar de esta página ${saved.length === 1 ? '1 foto ya guardada' : saved.length + ' fotos ya guardadas'}?`)) return;
+    saved.forEach(removePhoto);
+    refreshThumb();
+    toast('Hecho');
+  });
+
+  /* ---------- Icono para la pantalla de inicio ---------- */
+  try {
+    const c = document.createElement('canvas');
+    c.width = c.height = 180;
+    const x = c.getContext('2d');
+    x.fillStyle = '#141414'; x.fillRect(0, 0, 180, 180);
+    x.fillStyle = '#2a2a2a'; x.beginPath(); x.arc(90, 92, 56, 0, Math.PI * 2); x.fill();
+    x.strokeStyle = '#ffffff'; x.lineWidth = 9; x.beginPath(); x.arc(90, 92, 44, 0, Math.PI * 2); x.stroke();
+    x.fillStyle = '#ffd60a'; x.beginPath(); x.arc(90, 92, 24, 0, Math.PI * 2); x.fill();
+    x.fillStyle = '#ffffff'; x.beginPath(); x.arc(132, 46, 8, 0, Math.PI * 2); x.fill();
+    const link = document.createElement('link');
+    link.rel = 'apple-touch-icon';
+    link.href = c.toDataURL('image/png');
+    document.head.appendChild(link);
+  } catch (e) {}
+
+  /* ---------- Arranque ---------- */
+  try { if (navigator.storage && navigator.storage.persist) navigator.storage.persist(); } catch (e) {}
+  db.all().then(list => {
+    const known = new Set(photos.map(p => p.id));
+    const loaded = (list || []).filter(r => r && r.blob && !known.has(r.id)).sort((a, b) => a.ts - b.ts);
+    photos = loaded.concat(photos);
+    refreshThumb();
+  });
+  refreshThumb();
+  startCamera();
+})();
+</script>
+</body>
+</html>
