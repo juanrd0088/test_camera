@@ -138,6 +138,7 @@
     transition:transform .12s,inset .2s,border-radius .2s,background-color .2s;
   }
   .shutter:active::after{transform:scale(.88)}
+  .shutter.busy::after{transform:scale(.88);opacity:.6}
   .shutter.video::after{background:var(--rec)}
   .shutter.recording::after{inset:21px;border-radius:7px}
   .flip{justify-self:end;width:48px;height:48px}
@@ -320,12 +321,42 @@
     </div>
 
     <div class="group">
+      <div class="label">Peso de las fotos</div>
+      <div class="seg" id="sizeSeg">
+        <button data-size="high">Máxima</button>
+        <button data-size="balanced">Equilibrada</button>
+        <button data-size="light">Ligera</button>
+      </div>
+      <div class="hint" id="sizeHint"></div>
+    </div>
+
+    <div class="group">
       <div class="toggle-row">
         <div>
           <div class="t">Guardar al disparar</div>
           <div class="hint">Después de cada foto o vídeo se abre el menú Compartir para tocar «Guardar imagen» o «Guardar vídeo». Desactívalo para hacer varias seguidas y guardarlas todas juntas desde la miniatura.</div>
         </div>
         <button class="switch" id="quickSwitch" role="switch" aria-checked="false" aria-label="Guardar al disparar"></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="toggle-row">
+        <div>
+          <div class="t">Foto nítida</div>
+          <div class="hint">Al disparar mira 8 fotogramas seguidos (unos 0,3 segundos) y guarda el más nítido. Ayuda sobre todo cuando se te mueve la mano.</div>
+        </div>
+        <button class="switch" id="burstSwitch" role="switch" aria-checked="true" aria-label="Foto nítida"></button>
+      </div>
+    </div>
+
+    <div class="group">
+      <div class="toggle-row">
+        <div>
+          <div class="t">60 fotogramas por segundo</div>
+          <div class="hint">Cada fotograma se expone como mucho 1/60 s en vez de 1/30 s, así lo que se mueve deja menos estela. Puede bajar algo la resolución, y con poca luz sale más grano.</div>
+        </div>
+        <button class="switch" id="fpsSwitch" role="switch" aria-checked="false" aria-label="60 fotogramas por segundo"></button>
       </div>
     </div>
 
@@ -354,8 +385,17 @@
   const prevBtn = $('prevBtn'), nextBtn = $('nextBtn'), pic = $('pic');
   const saveBtn = $('saveBtn'), downloadBtn = $('downloadBtn'), saveAllBtn = $('saveAllBtn'), deleteBtn = $('deleteBtn');
   const sheet = $('sheet'), resSeg = $('resSeg'), resHint = $('resHint'), quickSwitch = $('quickSwitch'), fitSeg = $('fitSeg');
+  const burstSwitch = $('burstSwitch'), fpsSwitch = $('fpsSwitch');
 
-  const JPEG_QUALITY = 0.95;
+  // Peso de las fotos: calidad JPEG y, en "Ligera", tamaño máximo del lado largo.
+  const PHOTO_SIZES = {
+    high:     { q: 0.95, max: 0,
+                hint: 'Calidad JPEG 95 % y resolución completa. La que más pesa (3–4 MB a 12 MP).' },
+    balanced: { q: 0.85, max: 0,
+                hint: 'Calidad JPEG 85 % y resolución completa. Suele pesar la mitad que «Máxima» sin diferencia visible.' },
+    light:    { q: 0.80, max: 2560,
+                hint: 'Reduce la foto a 2560 píxeles de lado largo (unos 5 MP) con calidad 80 %. Suele quedarse en torno a 1 MB o menos; de sobra para verla en el móvil o enviarla.' },
+  };
 
   // Resoluciones que se piden a la cámara (son "ideales": Safari elige la más cercana que tenga).
   const RES = {
@@ -375,14 +415,21 @@
     res: prefs.get('res', 'max'),
     facing: prefs.get('facing', 'environment'),
     quickSave: prefs.get('quickSave', true),
+    burst: prefs.get('burst', true),
+    fps60: prefs.get('fps60', false),
+    photoSize: prefs.get('photoSize', 'balanced'),
     fit: prefs.get('fit', 'fill'),
     mode: 'photo',
   };
   if (!RES[settings.res]) settings.res = 'max';
   if (settings.facing !== 'user') settings.facing = 'environment';
   if (settings.fit !== 'fit') settings.fit = 'fill';
+  if (!PHOTO_SIZES[settings.photoSize]) settings.photoSize = 'balanced';
 
-  const resConstraints = () => (settings.mode === 'video' && settings.res === 'max') ? RES_VIDEO_MAX : RES[settings.res];
+  // Tamaño y fotogramas por segundo que se piden a la cámara.
+  const resConstraints = () => Object.assign({},
+    (settings.mode === 'video' && settings.res === 'max') ? RES_VIDEO_MAX : RES[settings.res],
+    settings.fps60 ? { frameRate: { ideal: 60 } } : {});
 
   /* ---------- Utilidades ---------- */
   let toastTimer;
@@ -403,6 +450,7 @@
   const fmtNum = (n, d = 1) => n.toLocaleString('es-ES', { maximumFractionDigits: d });
   const megapixels = (w, h) => fmtNum(w * h / 1e6) + ' MP';
   const pad = (n, l = 2) => String(n).padStart(l, '0');
+  const fmtBytes = b => b >= 1e6 ? fmtNum(b / 1e6) + ' MB' : Math.max(1, Math.round(b / 1e3)) + ' KB';
   const fmtDur = s => { s = Math.max(0, Math.floor(s));return pad(Math.floor(s / 60)) + ':' + pad(s % 60); };
   const extFor = type => /quicktime/.test(type) ? 'mov' : /mp4/.test(type) ? 'mp4' : /webm/.test(type) ? 'webm' : 'jpg';
   function fileName(ts, kind, type) {
@@ -698,9 +746,11 @@
 
   function updateResLabel() {
     const w = video.videoWidth, h = video.videoHeight;
+    let fps = 0;
+    try { fps = Math.round((track && track.getSettings && track.getSettings().frameRate) || 0); } catch (e) {}
     resChip.textContent = w ? megapixels(w, h) : '—';
     resHint.textContent = w
-      ? `Ahora mismo: ${w} × ${h} píxeles (${megapixels(w, h)}). Si con alguna resolución la cámara enfoca mejor que con otra, quédate con esa.`
+      ? `Ahora mismo: ${w} × ${h} píxeles (${megapixels(w, h)})${fps ? ` a ${fps} fps` : ''}. Si con alguna resolución la cámara enfoca mejor que con otra, quédate con esa.`
       : '';
   }
   video.addEventListener('resize', updateResLabel);
@@ -776,18 +826,32 @@
     } catch (e) { return false; }
   })();
 
-  function takePhoto() {
-    const canvas = grabFrame();
-    if (!canvas) return;
-    flashEffect();
-    const w = canvas.width, h = canvas.height;
-    const thumbUrl = makeThumb(canvas);
+  // Guarda lo que haya en capCanvas como foto (y abre Compartir si toca).
+  const outCanvas = document.createElement('canvas');
+  // Si el ajuste de peso lo pide, reduce la foto antes de comprimirla.
+  function resizeForSaving(canvas) {
+    const max = PHOTO_SIZES[settings.photoSize].max;
+    const long = Math.max(canvas.width, canvas.height);
+    if (!max || long <= max) return canvas;
+    const k = max / long;
+    outCanvas.width = Math.round(canvas.width * k);
+    outCanvas.height = Math.round(canvas.height * k);
+    const ctx = outCanvas.getContext('2d');
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
+    ctx.drawImage(canvas, 0, 0, outCanvas.width, outCanvas.height);
+    return outCanvas;
+  }
 
+  function savePhotoFromCanvas(src) {
+    const thumbUrl = makeThumb(src);
+    const canvas = resizeForSaving(src);
+    const w = canvas.width, h = canvas.height;
+    const q = PHOTO_SIZES[settings.photoSize].q;
     if (settings.quickSave && canShareFiles) {
-      // Todo síncrono para que Safari siga considerando que es el toque del usuario
-      // y deje abrir el menú Compartir.
+      // Síncrono hasta navigator.share para que Safari aún lo considere parte del toque.
       let blob;
-      try { blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', JPEG_QUALITY)); }
+      try { blob = dataURLtoBlob(canvas.toDataURL('image/jpeg', q)); }
       catch (e) { toast('No se pudo crear la foto'); return; }
       const p = addItem({ kind: 'photo', blob, type: 'image/jpeg', w, h, thumb: thumbUrl });
       shareList([p]);
@@ -795,8 +859,75 @@
       canvas.toBlob(b => {
         if (!b) { toast('No se pudo crear la foto'); return; }
         addItem({ kind: 'photo', blob: b, type: 'image/jpeg', w, h, thumb: thumbUrl });
-      }, 'image/jpeg', JPEG_QUALITY);
+      }, 'image/jpeg', q);
     }
+  }
+
+  /* Nitidez de un fotograma: varianza del laplaciano en un recorte central.
+     Cuanto más alto, más detalle fino (menos movimiento / mejor enfoque). */
+  const SCORE_SIDE = 320;
+  const scoreCanvas = document.createElement('canvas');
+  scoreCanvas.width = scoreCanvas.height = SCORE_SIDE;
+  const scoreCtx = scoreCanvas.getContext('2d', { willReadFrequently: true });
+  const gray = new Float32Array(SCORE_SIDE * SCORE_SIDE);
+  function frameSharpness() {
+    const w = video.videoWidth, h = video.videoHeight;
+    if (!w || !h) return 0;
+    const region = Math.min(w, h, SCORE_SIDE * 2); // recorte central, reducido como mucho a la mitad
+    const n = SCORE_SIDE;
+    scoreCtx.drawImage(video, (w - region) / 2, (h - region) / 2, region, region, 0, 0, n, n);
+    const d = scoreCtx.getImageData(0, 0, n, n).data;
+    for (let i = 0, j = 0; i < gray.length; i++, j += 4) gray[i] = d[j] * 0.299 + d[j + 1] * 0.587 + d[j + 2] * 0.114;
+    let sum = 0, sum2 = 0, cnt = 0;
+    for (let y = 1; y < n - 1; y++) {
+      for (let x = 1, i = y * n + 1; x < n - 1; x++, i++) {
+        const l = gray[i - 1] + gray[i + 1] + gray[i - n] + gray[i + n] - 4 * gray[i];
+        sum += l; sum2 += l * l; cnt++;
+      }
+    }
+    const mean = sum / cnt;
+    return sum2 / cnt - mean * mean;
+  }
+
+  const BURST_FRAMES = 8;
+  let bursting = false;
+  function takePhoto() {
+    if (bursting) return;
+    if (!settings.burst) {
+      const canvas = grabFrame();
+      if (!canvas) return;
+      flashEffect();
+      savePhotoFromCanvas(canvas);
+      return;
+    }
+
+    // Ráfaga: se queda con el fotograma más nítido. Solo se copia a tamaño completo
+    // el que va ganando, así apenas gasta memoria.
+    bursting = true;
+    shutter.classList.add('busy');
+    flashEffect();
+    let best = -1, seen = 0, done = false;
+    const consider = () => {
+      const s = frameSharpness();
+      if (s > best && grabFrame()) best = s;
+      seen++;
+    };
+    const finish = () => {
+      if (done) return;
+      done = true;
+      clearTimeout(safety);
+      bursting = false;
+      shutter.classList.remove('busy');
+      if (best >= 0 && capCanvas.width) savePhotoFromCanvas(capCanvas);
+    };
+    const next = () => {
+      if (seen >= BURST_FRAMES || !track) return finish();
+      if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(() => { if (!done) { consider(); next(); } });
+      else setTimeout(() => { if (!done) { consider(); next(); } }, 34);
+    };
+    const safety = setTimeout(finish, 1500); // por si el vídeo se para
+    consider(); // el fotograma del momento exacto del toque también cuenta
+    next();
   }
 
   shutter.addEventListener('click', () => {
@@ -1007,13 +1138,13 @@
         vVid.dataset.id = p.id;
       }
       vVid.hidden = false;
-      vStatus.textContent = `Vídeo · ${fmtDur(p.dur)} · ${p.saved ? 'Guardado ✓' : 'Sin guardar'}`;
+      vStatus.textContent = `Vídeo · ${fmtDur(p.dur)} · ${fmtBytes(p.blob.size)} · ${p.saved ? 'Guardado ✓' : 'Sin guardar'}`;
     } else {
       clearViewerVideo();
       vImg.hidden = false;
       const u = urlOf(p);
       if (vImg.getAttribute('src') !== u) { resetZoom(); vImg.src = u; }
-      vStatus.textContent = `${p.saved ? 'Guardada ✓' : 'Sin guardar'} · ${p.w}×${p.h}`;
+      vStatus.textContent = `${p.saved ? 'Guardada ✓' : 'Sin guardar'} · ${p.w}×${p.h} · ${fmtBytes(p.blob.size)}`;
     }
     vCount.textContent = `${vi + 1} / ${items.length}`;
     vStatus.classList.toggle('saved', p.saved);
@@ -1157,9 +1288,32 @@
     Array.from(resSeg.children).forEach(b => b.classList.toggle('active', b.dataset.res === settings.res));
     quickSwitch.setAttribute('aria-checked', String(settings.quickSave && canShareFiles));
     quickSwitch.disabled = !canShareFiles;
+    Array.from($('sizeSeg').children).forEach(b => b.classList.toggle('active', b.dataset.size === settings.photoSize));
+    $('sizeHint').textContent = PHOTO_SIZES[settings.photoSize].hint;
+    burstSwitch.setAttribute('aria-checked', String(settings.burst));
+    fpsSwitch.setAttribute('aria-checked', String(settings.fps60));
     applyFit();
     updateResLabel();
   }
+  $('sizeSeg').addEventListener('click', e => {
+    const b = e.target.closest('button[data-size]');
+    if (!b) return;
+    settings.photoSize = b.dataset.size;
+    prefs.set('photoSize', settings.photoSize);
+    renderSettings();
+  });
+  burstSwitch.addEventListener('click', () => {
+    settings.burst = !settings.burst;
+    prefs.set('burst', settings.burst);
+    renderSettings();
+  });
+  fpsSwitch.addEventListener('click', () => {
+    settings.fps60 = !settings.fps60;
+    prefs.set('fps60', settings.fps60);
+    renderSettings();
+    resHint.textContent = 'Cambiando…';
+    startCamera().then(updateResLabel);
+  });
   function openSheet() { if (isRecording()) return; renderSettings(); sheet.hidden = false; }
   settingsBtn.addEventListener('click', openSheet);
   resChip.addEventListener('click', openSheet);
